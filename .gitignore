@@ -1,0 +1,7 @@
+*.tar.gz
+checkpoint
+*swp
+*.ckpt.*
+*.DS_Store
+*/.idea/*
+
