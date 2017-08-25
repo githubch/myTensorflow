@@ -2,16 +2,16 @@ import numpy as np
 import tensorflow as tf
 from tensorflow.contrib.legacy_seq2seq.python.ops import seq2seq
 
-HIDDEN_SIZE = 500
-NUM_LAYERS = 2
+HIDDEN_SIZE = 512
+NUM_LAYERS = 4
 VOCAB_SIZE = 33
 LEARNING_RATE = 0.8
-TRAIN_BATCH_SIZE = 10
+TRAIN_BATCH_SIZE = 1
 TRAIN_NUM_STEP = 6
 
-EVAL_BATCH_SIZE = 10
+EVAL_BATCH_SIZE = 1
 EVAL_NUM_STEP = 6
-NUM_EPOCH = 50000
+NUM_EPOCH = 5000
 KEEP_PROB = 0.5
 # MAX_GRAD_NORM = 5
 MAX_GRAD_NORM = 10
@@ -67,7 +67,7 @@ class LSTMModel(object):
         regularization_cost = tf.reduce_sum([tf.nn.l2_loss(v) for v in trainable_variables])
         self.total_loss = self.cost + regularization_cost
         learning_rate = tf.train.exponential_decay(LEARNING_RATE, self.global_step,
-                                                   batch_counts/self.batch_size, LEARNING_RATE_DECAY, staircase=True)
+                                                   batch_counts, LEARNING_RATE_DECAY, staircase=True)
 
         self.final_state = state
 
@@ -89,7 +89,8 @@ def run_epoch(session, model, data, train_op, output_log):
     total_costs = 0.0
     iters = 0
     state = session.run(model.initial_state)
-    for step, (x, y) in enumerate(get_enumerate(data, model.batch_size, model.num_steps)):
+    # for step, (x, y) in enumerate(get_enumerate_in_array(data, model.batch_size, model.num_steps)):
+    for step, (x, y) in enumerate(get_enumerate_in_list(data, model.batch_size, model.num_steps)):
         # cost, state, _ = session.run([model.cost, model.final_state, train_op],
         cost, state, _ = session.run([model.total_loss, model.final_state, train_op],
                                      {
@@ -97,16 +98,15 @@ def run_epoch(session, model, data, train_op, output_log):
                                          model.targets: y,
                                          model.initial_state: state
                                      })
-
         total_costs += cost
         iters += model.num_steps
         if output_log and step % 20 == 0:
-            print("After %d steps, perplexity is %.3f" % (step, np.exp(total_costs / (iters + 0))))
+            print("After %d steps, perplexity is %.3f, cost is %0.6f" % (step, np.exp(total_costs / (iters + 0)), cost))
 
     return np.exp(total_costs / (iters + 0))
 
 
-def get_enumerate(raw_data, batch_size, num_steps):
+def get_enumerate_in_array(raw_data, batch_size, num_steps):
     # raw_data = np.array(raw_data, dtype=np.int32)
     # data_len = len(raw_data)
     # batch_len = data_len // batch_size
@@ -134,7 +134,7 @@ def get_enumerate(raw_data, batch_size, num_steps):
         yield (x, y)
 
 
-def get_data():
+def get_data_in_array():
     lottery_file = "train_data.csv"
     lotteries = []
     with open(lottery_file, "r") as f:
@@ -150,11 +150,46 @@ def get_data():
     return train_data, valid_data, eval_data
 
 
+def get_enumerate_in_list(raw_data, batch_size, num_steps):
+    raw_data = np.array(raw_data, dtype=np.int32)
+
+    data_len = len(raw_data)
+    batch_len = data_len // batch_size
+    data = np.zeros([batch_size, batch_len], dtype=np.int32)
+    for i in range(batch_size):
+        data[i] = raw_data[batch_len * i:batch_len * (i + 1)]
+
+    epoch_size = (batch_len - 1) // num_steps
+
+    if epoch_size == 0:
+        raise ValueError("epoch_size == 0, decrease batch_size or num_steps")
+
+    for i in range(epoch_size):
+        x = data[:, i * num_steps:(i + 1) * num_steps]
+        y = data[:, i * num_steps + 1:(i + 1) * num_steps + 1]
+        yield (x, y)
+
+
+def get_data_in_list():
+    lottery_file = "train_data.csv"
+    lotteries = []
+    with open(lottery_file, "r") as f:
+        for one_term in f:
+            one_term_digits_string = one_term.strip().split(",")
+            [lotteries.append(int(num) - 1) for num in one_term_digits_string]
+    train_data = lotteries[0:2001 * 6 + 1]
+    valid_data = lotteries[2001 * 6: 2101 * 6 + 1]
+    eval_data = lotteries[2101 * 6: 2141 * 6 + 1]
+
+    return train_data, valid_data, eval_data
+
+
 def main():
-    train_data, valid_data, test_data = get_data()
+    # train_data, valid_data, test_data = get_data_in_array()
+    train_data, valid_data, test_data = get_data_in_list()
     initializer = tf.random_uniform_initializer(-0.05, 0.05)
     with tf.variable_scope("lottery_train", reuse=None, initializer=initializer):
-        train_model = LSTMModel(True, TRAIN_BATCH_SIZE, TRAIN_NUM_STEP, len(train_data))
+        train_model = LSTMModel(True, TRAIN_BATCH_SIZE, TRAIN_NUM_STEP, len(train_data) * 3)
 
     with tf.variable_scope("lottery_train", reuse=True, initializer=initializer):
         eval_model = LSTMModel(False, EVAL_BATCH_SIZE, EVAL_NUM_STEP, len(valid_data))
@@ -163,11 +198,17 @@ def main():
         tf.global_variables_initializer().run()
         for i in range(NUM_EPOCH):
             print("In iteration: %d" % (i + 1))
+            print("global step = %d" % (session.run(train_model.global_step)))
             run_epoch(session, train_model, train_data, train_model.train_op, True)
 
             valid_perplexity = run_epoch(session, eval_model, valid_data, tf.no_op(), False)
             print("Epoch: %d Validation Perplexity: %.3f" % (i + 1, valid_perplexity))
-            if valid_perplexity < 10 or (i >= 150 and i % 50 == 0):
+            # if i % 10 == 0:
+            #    for i in range(len(train_costs)):
+            #        print("loss on training is %.6f" % (train_costs[i]))
+            if (i >= 500 and i % 500 == 0) or (valid_perplexity < 10 and i % 20 == 0):
+                #    for i in range(len(valid_costs)):
+                #        print("loss on valid data is %.6f" % (valid_costs[i]))
                 saver.save(session, "./model.ckpt")
 
         test_perplexity = run_epoch(session, eval_model, test_data, tf.no_op(), False)
