@@ -59,16 +59,20 @@ class LSTMModel(object):
                                                 weights=[tf.ones([batch_size * TERM_SIZE], dtype=tf.float32)])
 
         self.cost = tf.reduce_mean(loss)
-        self.global_step = tf.Variable(0, dtype=tf.int32)
-        self.learning_rate = tf.train.exponential_decay(LEARNING_RATE, self.global_step, batch_counts / self.batch_size,
-                                                        LEARNING_RATE_DECAY, staircase=True)
+        self.final_state_fw = state_fw
         self.predictions = tf.cast(tf.argmax(logits, 1), tf.int32)
         self.correct_prediction = tf.equal(self.predictions, tf.reshape(self.targets, [-1]))
         self.accuracy = tf.reduce_mean(tf.cast(self.correct_prediction, tf.float32))
-        self.final_state_fw = state_fw
+
+        self.global_step = tf.Variable(0, dtype=tf.int32, trainable=False)
+        self.learning_rate = tf.train.exponential_decay(LEARNING_RATE, self.global_step, batch_counts / self.batch_size,
+                                                        LEARNING_RATE_DECAY, staircase=True)
+        trainable_variables = tf.trainable_variables()
+        # regularization_cost = tf.reduce_sum([tf.nn.l2_loss(v) for v in trainable_variables])
+        regularization_cost = tf.nn.l2_loss(weight) + tf.nn.l2_loss(bias)
+        self.cost = self.cost + REGULARIZATION_RATE * regularization_cost
         if not is_training:
             return
-        trainable_variables = tf.trainable_variables()
         grads, _ = tf.clip_by_global_norm(tf.gradients(self.cost, trainable_variables), MAX_GRAD_NORM)
 
         self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.cost, global_step=self.global_step)
@@ -160,7 +164,7 @@ def get_data_in_list():
             one_term_digits_string = one_term.strip().split(",")
             [lotteries.append(int(num) - 1) for num in one_term_digits_string]
     train_data = lotteries[0:12660]
-    valid_data = lotteries[12660: 12600 + 102]
+    valid_data = lotteries[12600: 12600 + 102]
     eval_data = lotteries[12600 + 102: 12600 + 102 + 84]
 
     return train_data, valid_data, eval_data
