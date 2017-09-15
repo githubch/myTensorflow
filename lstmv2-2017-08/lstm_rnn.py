@@ -84,6 +84,7 @@ def run_epoch(session, model, data, train_op, output_log, total_iter, is_trainin
     total_costs = 0.0
     iters = 0
     data_len = len(data) // model.batch_size
+    data_len = (data_len - model.num_steps-TERM_SIZE) // TERM_SIZE
     for step, (x, y) in enumerate(get_enumerate_in_list(data, model.batch_size, model.num_steps)):
         state_fw = session.run(model.initial_state_fw)
         cost, state_fw, accuracy, learning_rate, predications, _ = session.run(
@@ -165,7 +166,7 @@ def get_data_in_list():
             [lotteries.append(int(num) - 1) for num in one_term_digits_string]
     train_data = lotteries[0:12660]
     valid_data = lotteries[12600: 12600 + 102]
-    eval_data = lotteries[12600 + 102: 12600 + 102 + 84]
+    eval_data = lotteries[12600 + 102:]
 
     return train_data, valid_data, eval_data
 
